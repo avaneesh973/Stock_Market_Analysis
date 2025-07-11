@@ -5,9 +5,14 @@ from statsmodels.tsa.arima.model import ARIMA
 
 
 def load_stock_data(ticker, start_date, end_date):
-    df = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True)
-    df['Log_Close'] = np.log(df['Close'])
-    return df
+    try:
+        df = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True)
+        if df.empty:
+            return None
+        df['Log_Close'] = np.log(df['Close'])
+        return df
+    except Exception:
+        return None
 
 
 def rolling_arima_forecast(df, train_end_date, test_start_date, order=(1, 1, 1), window_size=120):
