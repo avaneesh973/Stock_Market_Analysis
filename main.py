@@ -1,45 +1,55 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from statsmodels.tsa.arima.model import ARIMA
 import yfinance as yf
+from statsmodels.tsa.arima.model import ARIMA
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-#downloading the data
-df = yf.download("AAPL", start='2010-01-01', end='2025-06-30', auto_adjust=True)
+# Step 1: Load the stock data
+df = yf.download("AAPL", start='2015-01-01', end='2025-06-30', auto_adjust=True)
 
-#plotting the close price of the selected company
-plt.figure(figsize=(12, 6))
-plt.plot(df['Close'])
-plt.title('Apple Stock Price (Close)')
-plt.xlabel('Date')
-plt.ylabel('Price')
-plt.savefig('apple.png')
+df['Log_Close'] = np.log(df['Close'])
 
-#Calculating moving averages of close price
-ma100 = df.Close.rolling(100).mean()
-ma200 = df.Close.rolling(200).mean()
-#plotting the close price and moving averages to visualize an approximate trend
-plt.figure(figsize=(12,8))
-plt.plot(df['Close'])
-plt.plot(ma100)
-plt.plot(ma200)
-plt.savefig('apple_ma.png')
+# Step 2: Split data into training and testing (June 2025 = test set)
+train = df[df.index < '2025-04-01']['Log_Close']
+test = df[(df.index >= '2025-04-01')]['Log_Close']
 
-# Removing the COVID Period (Optional)
-covid_start = '2020-02-01'
-covid_end = '2020-12-31'
-data = data[(data.index < covid_start) | (data.index > covid_end)]
+print(f"Train length: {len(train)}")
+print(f"Test length: {len(test)}")
 
-#Splitting data into train and test data
-train_data = data[(data.index < '2025-05-31')]
-test_data = data[(data.index > '2025-05-31')]
+# Step 3: Rolling Forecast with fixed (p,d,q) and sliding window (last 120 days)
+history = train.copy()
+predictions_log = []
 
-# Calculate daily log returns
-train_data['Log_Returns'] = np.log(train_data['Close'] / train_data['Close'].shift(1))
-train_data.dropna(inplace=True)
+for t in range(len(test)):
+    window = history[-120:] if len(history) > 120 else history
+    
+    model = ARIMA(window, order=(1,1,1))  # d=1 handles differencing
+    model_fit = model.fit()
+    
+    forecast_log = model_fit.forecast(steps=1)
+    predictions_log.append(forecast_log)
+    
+    history = pd.concat([history, pd.Series([test.iloc[t]], index=[test.index[t]])])
 
-# Fit ARIMA on log returns (or differenced data)
-model = ARIMA(train_data['Log_Returns'], order=(1,0,1))
-model_fit = model.fit()
+# Convert both predictions and actual test data back to normal prices
+predicted_prices = np.exp(predictions_log)
+actual_prices = np.exp(test.values)
 
-#Forecasting June 2025
+plt.figure(figsize=(12,6))
+#plt.plot(df[df.index < '2025-06-01'].index, df[df.index < '2025-06-01']['Close'], label='Train (Original Prices)')
+plt.plot(df[(df.index >= '2025-04-01')].index, actual_prices, label='Actual Prices')
+plt.plot(df[(df.index >= '2025-04-01')].index, predicted_prices, label='Forecast Prices', linestyle='--')
+plt.legend()
+plt.title('Rolling ARIMA Forecast (on Log Prices, Converted Back)')
+plt.savefig('new.png')
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+rmse = np.sqrt(mean_squared_error(actual_prices, predicted_prices))
+mae = mean_absolute_error(actual_prices, predicted_prices)
+mape = np.mean(np.abs((actual_prices - predicted_prices) / actual_prices)) * 100
+
+print(f'RMSE: {rmse:.2f}')
+print(f'MAE: {mae:.2f}')
+print(f'MAPE: {mape:.2f}%')
